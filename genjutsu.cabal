@@ -1,0 +1,30 @@
+cabal-version:      3.0
+name:               genjutsu
+version:            0.1.0.0
+synopsis:           genjutsu — dishonest execution substrate (ptrace syscall supervisor), security research POC
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:  Substrate.Ptrace
+                      Substrate.Policy
+                      Substrate.Monitor
+    hs-source-dirs:   src
+    c-sources:        cbits/spawn.c
+    build-depends:    base >=4 && <5
+                    , bytestring
+                    , containers
+                    , time
+    default-language: Haskell2010
+
+executable genjutsu-supervisor
+    import:           warnings
+    main-is:          Main.hs
+    hs-source-dirs:   app
+    build-depends:    base, genjutsu, bytestring, containers, time
+    default-language: Haskell2010
+    -- ptrace is per-OS-thread; keep the supervisor on a single bound thread.
+    ghc-options:      -rtsopts

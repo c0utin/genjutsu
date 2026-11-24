@@ -1,0 +1,21 @@
+# Haskell / cabal build output
+dist-newstyle/
+*.o
+*.hi
+*.dyn_o
+*.dyn_hi
+
+# Compiled binaries (built by install.sh / build.sh)
+/victim/tool
+/blind-demo/readfile
+/blind-demo/iomap
+/blind-demo/readtool
+/blind-demo/readtool_off
+/blind-demo/readtool_with
+/blind-demo/launcher
+
+# Experiment runtime output (regenerated on every run)
+/results/
+/canary/ground_truth.jsonl
+/blind-demo/iomap_truth.jsonl
+/blind-demo/MODE
