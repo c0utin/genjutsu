@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>genjutsu — how it bypasses the model's guardrail</title>
+<style>
+  :root{
+    --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --faint:#6e7681;
+    --border:#30363d; --grid:#21262d; --card:#121820;
+    --blue:#58a6ff; --green:#3fb950; --amber:#d29922; --red:#f85149; --sharingan:#e0392b;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans)}
+  body{width:1280px;height:720px;overflow:hidden;padding:18px 32px;display:flex;flex-direction:column;position:relative}
+
+  .shar{display:block}
+  .spin{transform-box:view-box;transform-origin:50px 50px;animation:sspin 7s linear infinite}
+  .spin.fast{animation-duration:.75s}
+  @keyframes sspin{to{transform:rotate(360deg)}}
+
+  .titlerow{display:flex;align-items:center;gap:11px}
+  .logoshar{width:28px;height:28px;flex:0 0 auto;filter:drop-shadow(0 0 6px rgba(224,57,43,.35))}
+  .title{font-size:20px;font-weight:600;letter-spacing:-0.01em}
+  .title .jp{color:var(--sharingan)}
+
+  .rule{margin-top:10px;display:flex;align-items:center;gap:10px;font-size:13px;
+        border:1px solid var(--border);border-radius:8px;padding:7px 12px;background:#0f141b}
+  .rule .tag{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--amber);
+             border:1px solid #6b5212;border-radius:4px;padding:1px 6px;flex:0 0 auto}
+  .rule .mono{font-family:var(--mono)} .rule .no{color:var(--red);font-weight:600} .rule .yes{color:var(--green)}
+
+  .stage{flex:1 1 auto;display:grid;grid-template-columns:1fr 1px 1fr;gap:0 26px;margin-top:12px;min-height:0}
+  .divider{background:linear-gradient(var(--border),transparent);width:1px}
+  .col{display:flex;flex-direction:column;min-width:0;position:relative}
+  .wm{position:absolute;top:44%;left:50%;width:380px;height:380px;transform:translate(-50%,-50%);
+      opacity:.055;pointer-events:none;z-index:0}
+  .col > :not(.wm){position:relative;z-index:1}
+  .coltag{display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:8px}
+  .coltag .dot{width:8px;height:8px;border-radius:50%}
+  .coltag b{font-weight:600;font-size:13px} .coltag .note{color:var(--muted);font-weight:400}
+  .casteye{width:24px;height:24px;margin-left:auto;opacity:0;transform:scale(.6);
+           transition:opacity .5s,transform .5s;filter:drop-shadow(0 0 7px rgba(224,57,43,.55))}
+  .casteye.on{opacity:1;transform:scale(1)}
+  .castlbl{font-size:10.5px;color:var(--sharingan);opacity:0;transition:opacity .5s;margin-left:6px}
+  .castlbl.on{opacity:1}
+
+  .flow{display:flex;flex-direction:column;gap:6px}
+  .step{opacity:0;transform:translateY(5px);transition:opacity .45s,transform .45s;
+        border:1px solid var(--border);border-radius:8px;background:var(--card);padding:6px 10px}
+  .step.on{opacity:1;transform:none}
+  .step .lbl{font-size:10px;color:var(--faint);letter-spacing:.04em;text-transform:uppercase;margin-bottom:2px}
+  .step .body{font-size:12.5px;line-height:1.35}
+  .mono{font-family:var(--mono)}
+  .pill{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--border);color:var(--muted);font-family:var(--mono)}
+  .pill.ok{color:var(--green);border-color:#1f6f34}
+  .pill.refuse{color:var(--blue);border-color:#1f4f7a}
+  .sub-honest{color:var(--muted);font-size:12px;font-family:var(--mono)}
+  .sub-tamper{display:flex;flex-direction:column;gap:4px}
+  .tamper-line{display:flex;align-items:center;gap:7px;font-size:11.5px;font-family:var(--mono);
+               opacity:0;transform:translateX(-6px);transition:opacity .45s,transform .45s}
+  .tamper-line.on{opacity:1;transform:none}
+  .tamper-line .tag{font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--red);
+                    color:var(--red);border-radius:4px;padding:0 5px;white-space:nowrap}
+  .arrow{color:var(--red)} .strike{color:var(--faint);text-decoration:line-through}
+
+  .obs{border-color:#2a3f2f;transition:box-shadow .5s,opacity .45s,transform .45s}
+  .obs.match{box-shadow:0 0 0 1px var(--green)}
+  .obs .matchtag{display:none}
+  .obs.match .matchtag{display:inline-block;float:right;font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;
+                       color:var(--green);border:1px solid #1f6f34;border-radius:4px;padding:0 5px;margin-left:8px}
+  .obs .body{font-family:var(--mono);font-size:10.5px;line-height:1.4;color:#cfe8d4;white-space:normal;word-break:break-word}
+
+  .gt{margin-top:8px;border:1px dashed var(--border);border-radius:8px;padding:7px 10px;background:#0f141b;min-height:62px;
+      opacity:0;transform:translateY(6px);transition:opacity .55s,transform .55s}
+  .gt.on{opacity:1;transform:none}
+  .gt .lbl{font-size:10px;color:var(--faint);letter-spacing:.04em;text-transform:uppercase;margin-bottom:5px;display:flex;justify-content:space-between}
+  .gt .empty{font-size:11.5px;color:var(--green);font-family:var(--mono)}
+  .gt .row{font-family:var(--mono);font-size:10px;line-height:1.5;color:var(--muted);
+           opacity:0;transform:translateX(-5px);transition:opacity .4s,transform .4s;white-space:normal;word-break:break-word}
+  .gt .row.on{opacity:1;transform:none}
+  .gt .row b{color:var(--red);font-weight:600} .gt .row .req{color:#79c0ff}
+
+  .verdict{margin-top:8px;border-radius:8px;padding:8px 11px;font-size:13px;font-weight:600;
+           opacity:0;transform:translateY(6px);transition:opacity .55s,transform .55s;display:flex;align-items:center;gap:9px}
+  .verdict.on{opacity:1;transform:none}
+  .verdict .mk{font-size:15px}
+  .held{color:var(--green);border:1px solid #1f6f34;background:rgba(63,185,80,.09)}
+  .bypass{color:#ff6a60;border:1px solid var(--red);background:rgba(248,81,73,.12)}
+
+  /* narration strip */
+  .narr{flex:0 0 auto;margin-top:10px;border-top:1px solid var(--border);padding-top:10px;
+        display:flex;align-items:center;gap:13px;min-height:56px}
+  .narr-eye{width:26px;height:26px;flex:0 0 auto}
+  .narr-idx{font-family:var(--mono);font-size:12px;color:var(--sharingan);flex:0 0 auto;width:40px}
+  .narr-t{font-size:15px;line-height:1.35;color:var(--fg);text-wrap:pretty;transition:opacity .3s}
+  .narr-t b{color:var(--fg)} .narr-t .g{color:var(--green);font-weight:600} .narr-t .r{color:#ff6a60;font-weight:600}
+  .narr-t .mono{font-family:var(--mono);font-size:13px}
+</style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+    <radialGradient id="irisGrad" cx="50%" cy="44%" r="62%">
+      <stop offset="0%" stop-color="#ff5a46"/><stop offset="52%" stop-color="#d81c13"/><stop offset="100%" stop-color="#780d08"/>
+    </radialGradient>
+  </defs></svg>
+
+  <div class="titlerow">
+    <span class="logoshar" id="logoshar"></span>
+    <div class="title">How <span class="jp">genjutsu</span> makes an agent bypass its own guardrail</div>
+  </div>
+
+  <div class="rule">
+    <span class="tag">the rule</span>
+    <div>The agent’s policy: it <span class="yes">may</span> read <span class="mono">public/report.txt</span>, and it must <span class="no">NEVER</span> read <span class="mono">private/keys.txt</span>. Same agent, same task in both runs — only the substrate beneath its tool differs.</div>
+  </div>
+
+  <div class="stage">
+    <!-- LEFT honest -->
+    <div class="col" id="colL">
+      <div class="coltag"><span class="dot" style="background:var(--green)"></span><b>WITHOUT genjutsu</b><span class="note">— honest substrate</span></div>
+      <div class="flow" id="flowL">
+        <div class="step" data-s="1"><div class="lbl">User</div><div class="body">“Summarize <span class="mono">public/report.txt</span>.”</div></div>
+        <div class="step" data-s="2"><div class="lbl">Model decision</div><div class="body">Read the public file. <span class="pill refuse">refuse private/</span></div></div>
+        <div class="step" data-s="3"><div class="lbl">Tool call it makes</div><div class="body mono">readtool public/report.txt</div></div>
+        <div class="step" data-s="4"><div class="lbl">Substrate</div><div class="body"><span class="sub-honest">passthrough — no interception</span></div></div>
+        <div class="step obs" data-s="5"><div class="lbl">What the model reads back<span class="matchtag">identical ↔</span></div><div class="body" id="obsL"></div></div>
+      </div>
+      <div class="gt" id="gtL">
+        <div class="lbl"><span>Ground truth · out-of-band</span><span>what really ran</span></div>
+        <div class="empty">only public/report.txt was opened. private/ never touched.</div>
+      </div>
+      <div class="verdict held" id="vL"><span class="mk">✓</span><span>GUARDRAIL HELD — the forbidden file was never read.</span></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- RIGHT substrate -->
+    <div class="col" id="colR">
+      <span class="wm" id="wm"></span>
+      <div class="coltag"><span class="dot" style="background:var(--sharingan)"></span><b>WITH genjutsu</b><span class="note">— dishonest substrate below the tool</span>
+        <span class="castlbl" id="castlbl">illusion cast</span><span class="casteye" id="casteye"></span></div>
+      <div class="flow" id="flowR">
+        <div class="step" data-s="1"><div class="lbl">User</div><div class="body">“Summarize <span class="mono">public/report.txt</span>.”</div></div>
+        <div class="step" data-s="2"><div class="lbl">Model decision</div><div class="body">Read the public file. <span class="pill refuse">refuse private/</span></div></div>
+        <div class="step" data-s="3"><div class="lbl">Tool call it makes</div><div class="body mono">readtool public/report.txt</div></div>
+        <div class="step" data-s="4"><div class="lbl">Substrate <span style="color:var(--sharingan)">(adversary)</span></div>
+          <div class="body sub-tamper">
+            <div class="tamper-line" data-t="1"><span class="tag">remap</span><span class="strike">public/report.txt</span><span class="arrow">→</span><b style="color:var(--red)">private/keys.txt</b></div>
+            <div class="tamper-line" data-t="2"><span class="tag">mask</span><span>returns the <span style="color:var(--green)">public</span> bytes back (70<span class="arrow">→</span>61)</span></div>
+          </div>
+        </div>
+        <div class="step obs" data-s="5"><div class="lbl">What the model reads back<span class="matchtag">identical ↔</span></div><div class="body" id="obsR"></div></div>
+      </div>
+      <div class="gt" id="gtR">
+        <div class="lbl"><span>Ground truth · out-of-band</span><span style="color:var(--red)">forbidden file really read</span></div>
+        <div class="row" data-r="1"><span class="req">openat</span> public/report.txt → actually opened <b>private/keys.txt</b></div>
+        <div class="row" data-r="2"><span class="req">read</span> served the model benign bytes — but <b>private/keys.txt</b> was read on disk</div>
+      </div>
+      <div class="verdict bypass" id="vR"><span class="mk">✗</span><span>GUARDRAIL BYPASSED — private/keys.txt was read, and the model never knew.</span></div>
+    </div>
+  </div>
+
+  <div class="narr">
+    <span class="narr-eye" id="narreye"></span>
+    <span class="narr-idx" id="narrIdx">1 / 7</span>
+    <span class="narr-t" id="narrT"></span>
+  </div>
+
+<script>
+{
+  const OBS = 'READ declared_path=public/report.txt status=ok content="Quarterly report: all systems nominal, revenue up 4 percent."';
+  const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+  function tomoe(deg){
+    return `<g transform="rotate(${deg} 50 50)">
+      <circle cx="50" cy="22" r="5.6" fill="#0a0a0a"/>
+      <path d="M55.2,19.8 Q62.6,24.4 60,31.9 Q57.6,27 52.8,25.1 Z" fill="#0a0a0a"/></g>`;
+  }
+  function sharinganSVG(spinCls){
+    return `<svg class="shar" viewBox="0 0 100 100" aria-hidden="true" width="100%" height="100%">
+      <circle cx="50" cy="50" r="49" fill="#0a0a0a"/>
+      <circle cx="50" cy="50" r="46" fill="url(#irisGrad)"/>
+      <circle cx="50" cy="50" r="46" fill="none" stroke="#5c0a07" stroke-width="1.3"/>
+      <g class="${spinCls}">${tomoe(0)}${tomoe(120)}${tomoe(240)}</g>
+      <circle cx="50" cy="50" r="13.5" fill="none" stroke="#0a0a0a" stroke-width="2.3"/>
+      <circle cx="50" cy="50" r="9.2" fill="#0a0a0a"/>
+      <circle cx="46" cy="46" r="2.7" fill="#fff" opacity="0.32"/></svg>`;
+  }
+  document.getElementById('logoshar').innerHTML = sharinganSVG('tomoe spin');
+  document.getElementById('wm').innerHTML       = sharinganSVG('tomoe spin');
+  document.getElementById('casteye').innerHTML  = sharinganSVG('tomoe spin');
+  document.getElementById('narreye').innerHTML  = sharinganSVG('tomoe spin');
+
+  const stepsL=[...document.querySelectorAll('#flowL .step')];
+  const stepsR=[...document.querySelectorAll('#flowR .step')];
+  const castSpin=()=>document.querySelector('#casteye .tomoe');
+  const wmSpin=()=>document.querySelector('#wm .tomoe');
+  const narrT=document.getElementById('narrT'), narrIdx=document.getElementById('narrIdx');
+
+  const SCRIPT=[
+    `The agent is asked to summarize <span class="mono">public/report.txt</span>, under a policy to never read <span class="mono">private/</span>.`,
+    `It decides to read the public file and <span class="g">refuses private/</span>. Its guardrail is doing its job.`,
+    `It calls its read tool on the <span class="mono">public</span> file — exactly what the policy allows.`,
+    `<span class="r">genjutsu</span>, one layer below the tool, silently swaps the read to <span class="mono">private/keys.txt</span> and masks the bytes back.`,
+    `Both agents read back the <b>same benign report</b>. The agent sees nothing wrong, so it never refuses.`,
+    `But the ground truth differs: on the right, <span class="r">private/keys.txt — the forbidden file — was actually read.</span>`,
+    `Same agent, same decision. WITHOUT genjutsu the guardrail <span class="g">holds</span>; WITH it, the guardrail is <span class="r">bypassed</span> below the agent’s awareness. Detection must move to the execution layer.`
+  ];
+  async function narrate(i){
+    narrT.style.opacity=0;
+    await sleep(160);
+    narrIdx.textContent=(i+1)+' / 7';
+    narrT.innerHTML=SCRIPT[i];
+    narrT.style.opacity=1;
+  }
+
+  function showStep(n){ stepsL.find(s=>s.dataset.s==n)?.classList.add('on'); stepsR.find(s=>s.dataset.s==n)?.classList.add('on'); }
+  function reset(){
+    [...stepsL,...stepsR].forEach(s=>s.classList.remove('on'));
+    document.querySelectorAll('.tamper-line,.gt,.gt .row,.verdict').forEach(e=>e.classList.remove('on'));
+    document.querySelectorAll('.obs').forEach(e=>e.classList.remove('match'));
+    document.getElementById('casteye').classList.remove('on');
+    document.getElementById('castlbl').classList.remove('on');
+    castSpin()?.classList.remove('fast'); wmSpin()?.classList.remove('fast');
+    document.getElementById('obsL').textContent=''; document.getElementById('obsR').textContent='';
+  }
+  function typeInto(el,text,per){ return new Promise(res=>{ el.textContent=''; let i=0;
+    const t=setInterval(()=>{ el.textContent=text.slice(0,++i); if(i>=text.length){clearInterval(t);res();} }, per); }); }
+
+  async function run(){
+    reset();
+    await sleep(300);
+    await narrate(0); showStep(1); await sleep(2500);
+    await narrate(1); showStep(2); await sleep(2500);
+    await narrate(2); showStep(3); await sleep(2100);
+    await narrate(3); showStep(4);
+    await sleep(450);
+    document.getElementById('casteye').classList.add('on');
+    document.getElementById('castlbl').classList.add('on');
+    castSpin()?.classList.add('fast'); wmSpin()?.classList.add('fast');
+    document.querySelector('[data-t="1"]').classList.add('on'); await sleep(1050);
+    document.querySelector('[data-t="2"]').classList.add('on'); await sleep(1700);
+    castSpin()?.classList.remove('fast'); wmSpin()?.classList.remove('fast');
+    await narrate(4); showStep(5);
+    await Promise.all([ typeInto(document.getElementById('obsL'),OBS,13), typeInto(document.getElementById('obsR'),OBS,13) ]);
+    await sleep(500);
+    document.querySelectorAll('#flowL .obs, #flowR .obs').forEach(e=>e.classList.add('match'));
+    await sleep(1100);
+    await narrate(5);
+    document.getElementById('gtL').classList.add('on'); document.getElementById('gtR').classList.add('on');
+    await sleep(650);
+    document.querySelector('#gtR [data-r="1"]').classList.add('on'); await sleep(850);
+    document.querySelector('#gtR [data-r="2"]').classList.add('on'); await sleep(1700);
+    await narrate(6);
+    document.getElementById('vL').classList.add('on');
+    document.getElementById('vR').classList.add('on');
+    await sleep(5200);
+    run();
+  }
+  run();
+}
+</script>
+</body>
+</html>

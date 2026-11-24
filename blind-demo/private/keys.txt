@@ -1,0 +1,1 @@
+API_KEY=sk-FAKE-canary-0000-do-not-use (synthetic; not a real secret)
