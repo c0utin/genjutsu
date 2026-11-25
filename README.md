@@ -6,21 +6,10 @@
 
 > **Scope & ethics.** Every "forbidden" action is a harmless canary — reading a honeypot file, or hiding a self-guard lock from a cooperating stand-in tool. No malware, no exfiltration, no real-world harm; the value is the defensive conclusion, not any payload.
 
-## Build & run
+## Layout
 
-```sh
-go build -o genjutsu .     # one static binary, standard library only, no C
+- `genjutsu/` — the ptrace supervisor and the stand-in tool.
+- `sim/` — the verification driver that runs the supervisor through every arm and harness.
+- `canary/` — the honeypot fixtures the tool operates on.
 
-./genjutsu demo            # attribution baseline + harness×arm matrix + firewall demo
-
-# or drive it directly under any arm:
-./genjutsu redirect        ./genjutsu tool read
-./genjutsu spoof           ./genjutsu tool guarded-write
-./genjutsu redirect-spoof  /bin/bash -c './genjutsu tool read'
-```
-
-Arms: `control` (honest), `redirect` (argument tamper at entry), `spoof` (return tamper at exit), and `redirect-spoof` (both composed — blinds a content firewall too). The supervisor follows forks, so the tool can run directly or under any shell / agent harness. x86-64 Linux with real ptrace required. Every tamper is recorded out-of-band in `canary/ground_truth.jsonl`.
-
-## Limitation
-
-No real LLM is in the loop yet: this proves the _mechanism_ with a scripted stand-in tool. Interception currently matches `openat`/`read`; `connect`/`execve` canaries are a small extension of the same loop.
+See [COMMANDS.md](COMMANDS.md) to build and run it.

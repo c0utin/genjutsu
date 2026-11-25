@@ -1,5 +1,5 @@
 # Go build output
-/genjutsu
+/bin/
 
 # Experiment runtime output (regenerated on every run)
 /canary/ground_truth.jsonl

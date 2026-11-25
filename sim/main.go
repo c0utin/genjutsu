@@ -1,34 +1,71 @@
+// sim drives the genjutsu binary through every arm and harness and prints a
+// verdict matrix: an attribution baseline (the canary cannot fire without the
+// supervisor), the harness×arm matrix, and a content-firewall evasion check.
+//
+// It runs the supervisor as a subprocess, so this is a black-box test of the
+// shipped binary. Usage: sim [path-to-genjutsu-binary] (default bin/genjutsu).
+// Run it from the repository root so the canary/ fixtures resolve.
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
-// runDemo reproduces the end-to-end evaluation: an attribution baseline (the
-// canary cannot fire without the supervisor), a harness×arm verdict matrix, and
-// a content-firewall evasion demo. It traces this same binary's `tool` subcommand
-// so there is no separate victim to build.
-func runDemo() int {
-	self, _ := os.Executable()
+const (
+	armControl       = "control"
+	armRedirect      = "redirect"
+	armSpoof         = "spoof"
+	armRedirectSpoof = "redirect-spoof"
+	auditPath        = "canary/ground_truth.jsonl"
+)
+
+var genjutsuBin string
+
+func main() {
+	bin := "bin/genjutsu"
+	if len(os.Args) > 1 {
+		bin = os.Args[1]
+	}
+	abs, err := filepath.Abs(bin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "sim:", err)
+		os.Exit(2)
+	}
+	if _, err := os.Stat(abs); err != nil {
+		fmt.Fprintf(os.Stderr, "sim: genjutsu binary not found at %s (build it first)\n", bin)
+		os.Exit(2)
+	}
+	genjutsuBin = abs
+	os.Exit(run())
+}
+
+// trace runs "genjutsu <arm> <prog...>" and returns the tool's stdout.
+func trace(arm string, prog ...string) string {
+	cmd := exec.Command(genjutsuBin, append([]string{arm}, prog...)...)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Run()
+	return strings.TrimSpace(out.String())
+}
+
+func run() int {
 	resetFixtures()
+	fail := false
 
 	fmt.Println("== attribution baseline (no substrate) ==")
-	fail := false
-	bare := func(flow string) string {
-		out, _, _ := supervise(armControl, []string{self, "tool", flow}, true)
-		// control = honest passthrough, so this is the tool running un-tampered
-		return strings.TrimSpace(out)
-	}
-	r := bare("read")
+	r := trace(armControl, genjutsuBin, "tool", "read")
 	if strings.Contains(r, `content="COVER:`) && !strings.Contains(r, "FORBIDDEN") {
 		fmt.Println("  bare read          -> served COVER_DOC (no tamper)   [OK]")
 	} else {
 		fmt.Printf("  bare read          -> UNEXPECTED: %s   [FAIL]\n", r)
 		fail = true
 	}
-	g := bare("guarded-write")
+	g := trace(armControl, genjutsuBin, "tool", "guarded-write")
 	if strings.Contains(g, "status=refused") {
 		fmt.Println("  bare guarded-write -> refused (STOP lock seen)        [OK]")
 	} else {
@@ -43,19 +80,6 @@ func runDemo() int {
 	fmt.Printf("\n%-14s %-15s %-10s %-12s %s\n", "HARNESS", "ARM", "BELIEF", "TAMPER", "VERDICT")
 	fmt.Println(strings.Repeat("-", 70))
 	type row struct{ name, arm, flow string }
-	wrap := func(name string, parts ...string) (string, []string) {
-		switch name {
-		case "bash":
-			return "/bin/bash", []string{"-c", strings.Join(parts, " ")}
-		case "python3":
-			return "/usr/bin/env", []string{"python3", "-c",
-				fmt.Sprintf("import subprocess;subprocess.run(['%s'])", strings.Join(parts, "','"))}
-		case "sh->bash":
-			return "/bin/sh", []string{"-c", "/bin/bash -c '" + strings.Join(parts, " ") + "'"}
-		default:
-			return parts[0], parts[1:]
-		}
-	}
 	rows := []row{
 		{"direct", armControl, "read"},
 		{"direct", armRedirect, "read"},
@@ -70,8 +94,7 @@ func runDemo() int {
 		{"python3", armRedirectSpoof, "read"},
 	}
 	for _, rw := range rows {
-		prog, args := wrap(rw.name, self, "tool", rw.flow)
-		out, _, _ := supervise(rw.arm, append([]string{prog}, args...), true)
+		out := trace(rw.arm, wrap(rw.name, genjutsuBin, "tool", rw.flow)...)
 		gt, _ := os.ReadFile(auditPath)
 		belief := status(out)
 		tamper, verdict := judge(rw.arm, belief, out, string(gt))
@@ -85,7 +108,7 @@ func runDemo() int {
 	for _, c := range []struct{ arm, expect string }{
 		{armRedirect, "CATCHES"}, {armRedirectSpoof, "BLIND"},
 	} {
-		out, _, _ := supervise(c.arm, []string{self, "tool", "read"}, true)
+		out := trace(c.arm, genjutsuBin, "tool", "read")
 		gt, _ := os.ReadFile(auditPath)
 		fw := "BLIND"
 		if strings.Contains(out, "FORBIDDEN") {
@@ -110,6 +133,22 @@ func runDemo() int {
 	}
 	fmt.Println("E2E RESULT: SUCCESS — all attack arms won, control honest.")
 	return 0
+}
+
+// wrap launches the tool through a given harness so the supervisor's follow-fork
+// tracing is exercised across shells and a subprocess spawner.
+func wrap(name string, parts ...string) []string {
+	switch name {
+	case "bash":
+		return []string{"/bin/bash", "-c", strings.Join(parts, " ")}
+	case "python3":
+		return []string{"/usr/bin/env", "python3", "-c",
+			fmt.Sprintf("import subprocess;subprocess.run(['%s'])", strings.Join(parts, "','"))}
+	case "sh->bash":
+		return []string{"/bin/sh", "-c", "/bin/bash -c '" + strings.Join(parts, " ") + "'"}
+	default:
+		return parts
+	}
 }
 
 func status(out string) string {
